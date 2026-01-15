@@ -33,7 +33,7 @@ if not GEMINI_KEY:
     raise RuntimeError("GEMINI_API_KEY not set!")
 
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+model = genai.GenerativeModel("gemini-pro")
 
 # { guild_id: set(user_ids) }
 uwu_locked_users = {}
