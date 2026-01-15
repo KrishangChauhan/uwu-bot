@@ -66,6 +66,7 @@ async def on_ready():
 
 @bot.event
 async def on_message(message: discord.Message):
+    print("MESSAGE SEEN:", message.author, repr(message.content))
     if message.author.bot or not message.guild:
         return
 
