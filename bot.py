@@ -1,4 +1,4 @@
-# ---- FAKE WEB SERVER FOR RENDER ----
+# ================= RENDER KEEP-ALIVE WEB SERVER =================
 from flask import Flask
 import threading
 import os
@@ -15,59 +15,78 @@ def run_web():
 
 threading.Thread(target=run_web).start()
 
-# ---- DISCORD BOT ----
+# ================= DISCORD BOT =================
 import discord
 from discord import app_commands
 from discord.ext import commands
-import google.generativeai as genai
 import asyncio
 
-# ---- CONFIG ----
-intents = discord.Intents.default()
-intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
+# ================= GEMINI =================
+import google.generativeai as genai
 
-# ---- GEMINI SETUP ----
+# ================= CONFIG =================
+TOKEN = os.getenv("TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+
+if not TOKEN:
+    raise RuntimeError("❌ TOKEN is not set in environment variables!")
 if not GEMINI_KEY:
-    raise RuntimeError("GEMINI_API_KEY not set!")
+    raise RuntimeError("❌ GEMINI_API_KEY is not set in environment variables!")
 
 genai.configure(api_key=GEMINI_KEY)
+
+# Use safe model
 model = genai.GenerativeModel("gemini-pro")
 
-# { guild_id: set(user_ids) }
+# ================= BOT SETUP =================
+intents = discord.Intents.default()
+intents.message_content = True
+
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+# guild_id -> set(user_ids)
 uwu_locked_users = {}
 
-# ---- AI UWU FUNCTION ----
+# ================= AI FUNCTION =================
 async def ai_uwuify(text: str) -> str:
     prompt = f"""
-Rewrite the following message in a cute, anime "uwu" style.
-Keep the SAME MEANING, SAME EMOTION, SAME INTENT.
-If it's angry, keep it angry. If it's threatening, keep it threatening. If it's normal, keep it normal.
-Just rewrite the language into uwu/anime style.
+Rewrite the following message in a cute anime "uwu" style.
+Keep the SAME MEANING, SAME INTENT, SAME EMOTION.
+If it's angry, keep it angry. If it's toxic, keep it toxic. If it's normal, keep it normal.
+Just rewrite the wording into uwu/anime style.
 
 Message:
 {text}
 """
 
     loop = asyncio.get_event_loop()
-    response = await loop.run_in_executor(
-        None, lambda: model.generate_content(prompt)
-    )
 
-    return response.text.strip()
+    def call_ai():
+        resp = model.generate_content(prompt)
+        return resp.text
 
-# ---- EVENTS ----
+    result = await loop.run_in_executor(None, call_ai)
+    return result.strip()
+
+# ================= EVENTS =================
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
-    await bot.tree.sync()
-    print("✅ Commands synced")
+    try:
+        synced = await bot.tree.sync()
+        print(f"✅ Commands synced: {len(synced)}")
+    except Exception as e:
+        print("❌ Sync error:", e)
 
 @bot.event
 async def on_message(message: discord.Message):
+    # Debug: confirm messages are seen
     print("MESSAGE SEEN:", message.author, repr(message.content))
-    if message.author.bot or not message.guild:
+
+    if message.author.bot:
+        return
+
+    if not message.guild:
         return
 
     guild_id = message.guild.id
@@ -80,20 +99,27 @@ async def on_message(message: discord.Message):
         try:
             uwu_text = await ai_uwuify(message.content)
 
-            await message.delete()
+            # Try deleting original
+            try:
+                await message.delete()
+            except Exception as e:
+                print("❌ Delete failed:", repr(e))
+
             await message.channel.send(
                 f"**{message.author.display_name} says:** {uwu_text}"
             )
+
         except Exception as e:
-            print("AI error:", e)
+            print("❌ AI ERROR:", repr(e))
 
     await bot.process_commands(message)
 
-# ---- COMMANDS ----
-@app_commands.checks.has_permissions(administrator=True)
+# ================= COMMANDS =================
 @bot.tree.command(name="uwu_lock", description="Curse a user with AI UwU speech")
+@app_commands.checks.has_permissions(administrator=True)
 async def uwu_lock(interaction: discord.Interaction, user: discord.Member):
     guild_id = interaction.guild.id
+
     if guild_id not in uwu_locked_users:
         uwu_locked_users[guild_id] = set()
 
@@ -103,10 +129,11 @@ async def uwu_lock(interaction: discord.Interaction, user: discord.Member):
         f"🔒 **{user.mention} has been AI-UwU cursed.** 😈"
     )
 
-@app_commands.checks.has_permissions(administrator=True)
 @bot.tree.command(name="uwu_unlock", description="Remove UwU curse from user")
+@app_commands.checks.has_permissions(administrator=True)
 async def uwu_unlock(interaction: discord.Interaction, user: discord.Member):
     guild_id = interaction.guild.id
+
     if guild_id in uwu_locked_users:
         uwu_locked_users[guild_id].discard(user.id)
 
@@ -114,9 +141,5 @@ async def uwu_unlock(interaction: discord.Interaction, user: discord.Member):
         f"🔓 **{user.mention} is free.** 🗿"
     )
 
-# ---- START ----
-TOKEN = os.getenv("TOKEN")
-if not TOKEN:
-    raise RuntimeError("TOKEN not set!")
-
+# ================= START =================
 bot.run(TOKEN)
